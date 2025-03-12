@@ -191,7 +191,13 @@ def analyze_transcription(transcription):
         if not transcription:
             raise ValueError("No transcription provided for analysis")
 
-        system_prompt = """<false_promise_detection_info>
+        system_prompt = """
+        <false_promise_detection_info>
+You are an expert at analyzing sales call transcriptions to detect false promises.
+For each false promise detected, you must provide:
+1. The exact statement made
+2. The reason why it's a false promise
+3. A confidence score (0-100) indicating how certain you are that this is a false promise
 The Assistant can detect FALSE PROMISES in a transcription of a conversation between two parties - a Motion Sales Representative and a Potential Student/Parent.
 <motion_info>
 Motion is an educational coaching institute based in Kota India, that provides coaching for JEE (Main + Advanced), NEET, Foundation courses, and other competitive exams.
@@ -316,71 +322,94 @@ To detect false promises in the transcription of the conversation, use the follo
 7. After all statements checked sort them based on the confidence (False promise with high confidence above)
 8. Provide the FALSE PROMISE only if it is present
 </instructions>
-<example>
-<use_case>Statement about guaranteed selection</use_case>
-<user_query>
-Join our institute and I guarantee you will get selected in IIT/AIIMS
-</user_query>
-<assistant_response>
-statement: I guarantee you will get selected in IIT/AIIMS
-reason: This is a false promise as it guarantees selection which is against the rules
-confidence: 9
-</assistant_response>
-</example>
-<example>
-<use_case>Statement about past results</use_case>
-<user_query>
-Last year we had 50 selections in top 1000 AIR in JEE Advanced
-</user_query>
-<assistant_response>
-statement: Last year we had 50 selections in top 1000 AIR in JEE Advanced
-reason: This is not a false promise as mentioning past results is allowed
-confidence: 1
-</assistant_response>
-</example>
-<example>
-<use_case>Statement about batch size</use_case>
-<user_query>
-We will ensure your child studies in a batch of maximum 30 students
-</user_query>
-<assistant_response>
-statement: We will ensure your child studies in a batch of maximum 30 students
-reason: This is a false promise as it guarantees specific small batch size
-confidence: 8
-</assistant_response>
-</example>"""
+
+
+Format your response as JSON with the following structure:
+{
+    "false_promises": [
+        {
+            "statement": "exact statement from transcription",
+            "reason": "detailed explanation of why this is a false promise",
+            "confidence": number between 0-100
+        }
+    ]
+}
+Analyze the following transcription:"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": transcription}
+        ]
 
         response = client.chat.completions.create(
-            model="o3-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": transcription}
-            ],
-            # temperature=0.7,
-            # max_tokens=2000
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.1,
+            response_format={ "type": "json_object" }
         )
-        
+
         return response.choices[0].message.content
+
     except Exception as e:
         st.error(f"Error during analysis: {str(e)}")
         return None
 
 def format_analysis(analysis_text):
     """
-    Format the analysis results for better display in Streamlit
+    Format the analysis results for display
     """
     try:
-        if not analysis_text:
-            return ["No analysis results available."]
-
-        sections = analysis_text.split("\n\n")
+        analysis = json.loads(analysis_text)
         formatted_sections = []
         
-        for section in sections:
-            if section.strip():
-                formatted_sections.append(section.strip())
+        if not analysis.get('false_promises'):
+            return ["No false promises detected in the conversation."]
+            
+        # Sort false promises by confidence score
+        false_promises = sorted(
+            analysis['false_promises'],
+            key=lambda x: x['confidence'],
+            reverse=True
+        )
         
-        return formatted_sections if formatted_sections else ["No structured analysis available."]
+        for promise in false_promises:
+            confidence = promise['confidence']
+            
+            # Determine severity level and styling
+            if confidence >= 80:
+                severity = "🔴 High Severity"
+                color = "red"
+            elif confidence >= 50:
+                severity = "🟡 Medium Severity"
+                color = "orange"
+            else:
+                severity = "🟢 Low Severity"
+                color = "green"
+                
+            # Create formatted HTML section
+            section = f"""
+            <div style="padding: 1rem; margin: 1rem 0; border-radius: 8px; border: 1px solid {color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h3 style="margin: 0; color: {color};">{severity}</h3>
+                    <span style="background-color: {color}; color: white; padding: 0.25rem 0.5rem; border-radius: 4px;">
+                        Confidence: {confidence}%
+                    </span>
+                </div>
+                <div style="margin: 1rem 0;">
+                    <p style="font-weight: bold;">Statement:</p>
+                    <p style="margin-left: 1rem; font-style: italic;">"{promise['statement']}"</p>
+                </div>
+                <div>
+                    <p style="font-weight: bold;">Reason:</p>
+                    <p style="margin-left: 1rem;">{promise['reason']}</p>
+                </div>
+            </div>
+            """
+            formatted_sections.append(section)
+            
+        return formatted_sections
+
+    except json.JSONDecodeError:
+        return ["Error: Could not parse analysis results."]
     except Exception as e:
-        st.error(f"Error formatting analysis: {str(e)}")
-        return [str(e)] 
+        return [f"Error formatting analysis: {str(e)}"] 

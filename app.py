@@ -6,10 +6,11 @@ import asyncio
 from functools import partial
 import aiohttp
 from utils import TranscriptionService
+import json
 
 # This MUST be the first Streamlit command
 st.set_page_config(
-    page_title="Sales Call Analysis",
+    page_title="Motion Sales Call Analysis",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -56,24 +57,17 @@ async def process_audio(audio_file):
         return None, None
 
 def main():
-    # Add custom CSS for column layout
+    # Header with left-aligned styling
     st.markdown("""
-    <style>
-    /* Main content area styling */
-    .main-content {
-        padding: 1rem;
-    }
-    </style>
+        <div style="padding: 2rem 0;">
+            <h1 style="margin-bottom: 1rem;">🎯 Motion Sales Call Analysis</h1>
+            <p style="font-size: 1.2rem; color: #666;">
+                Upload a sales call recording to analyze it for potential false promises and concerning patterns.
+            </p>
+        </div>
     """, unsafe_allow_html=True)
     
-    # Header
-    st.title("🎯 Sales Call Analysis")
-    st.markdown("""
-    Upload a sales call recording to analyze it for potential false promises and concerning patterns.
-    Supported formats: MP3, WAV, M4A
-    """)
-    
-    # File upload
+    # File upload with clean UI
     audio_file = st.file_uploader(
         "Upload Audio File",
         type=["mp3", "wav", "m4a"],
@@ -83,9 +77,14 @@ def main():
     if audio_file:
         st.audio(audio_file, format='audio/*')
         
-        # Add analyze button with unique key
-        if st.button("Analyze Call", key='analyze_call_button'):
-            with st.spinner("Processing audio... This may take a few minutes."):
+        # Add analyze button with improved styling
+        analyze_button = st.button(
+            "Analyze Call",
+            key='analyze_call_button',
+        )
+        
+        if analyze_button:
+            with st.spinner("🎯 Analyzing your sales call... This may take a few minutes."):
                 # Run async process_audio in the event loop
                 loop = asyncio.new_event_loop()
                 transcription, analysis = loop.run_until_complete(process_audio(audio_file))
@@ -96,38 +95,46 @@ def main():
                     st.session_state.analysis = analysis
                 
             if st.session_state.transcription:
-                st.success("Analysis completed!")
+                st.success("✨ Analysis completed successfully!")
                 
-                # Show transcription in expander
-                with st.expander("View Transcription"):
-                    st.markdown(st.session_state.transcription)
+                # Create two columns for the layout
+                col1, col2 = st.columns([1, 1])
                 
-                # Display analysis results
-                st.markdown("## Analysis Results")
-                
-                formatted_sections = format_analysis(st.session_state.analysis)
-                for section in formatted_sections:
-                    st.markdown(section)
-                    st.markdown("---")
-                
-                # Download buttons with unique keys
-                col1, col2 = st.columns(2)
                 with col1:
+                    # Show transcription in expander
+                    with st.expander("📝 View Transcription", expanded=False):
+                        st.markdown(st.session_state.transcription)
+                    
+                    # Download buttons
                     st.download_button(
-                        "Download Transcription",
+                        "📥 Download Transcription",
                         st.session_state.transcription,
                         file_name="transcription.txt",
                         mime="text/plain",
-                        key='download_transcription_button'
+                        key='download_transcription_button',
+                        use_container_width=True
                     )
+                
                 with col2:
+                    # Download analysis button
                     st.download_button(
-                        "Download Analysis",
+                        "📥 Download Analysis",
                         st.session_state.analysis,
-                        file_name="analysis.txt",
-                        mime="text/plain",
-                        key='download_analysis_button'
+                        file_name="analysis.json",
+                        mime="application/json",
+                        key='download_analysis_button',
+                        use_container_width=True
                     )
+                
+                # Display detailed analysis results
+                st.markdown("## 🔍 Detailed Analysis")
+                
+                try:
+                    formatted_sections = format_analysis(st.session_state.analysis)
+                    for section in formatted_sections:
+                        st.markdown(section, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error("Error displaying analysis results")
 
 if __name__ == "__main__":
     main() 
