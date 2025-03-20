@@ -101,15 +101,25 @@ class APIService:
         max_attempts = self.max_poll_time // self.poll_interval
         attempt = 0
         
+        # Track analysis stages
+        analysis_stages = {
+            "Started": 20,
+            "Transcription": 40,
+            "Base Analysis": 60,
+            "False Promise Analysis": 80,
+            "Abusive/Bad Call Analysis": 100
+        }
+        
+        current_stage = "Started"
+        progress_bar.progress(analysis_stages[current_stage])
+        
         while attempt < max_attempts:
-            status_container.info(f"Processing call analysis... (Attempt {attempt+1}/{max_attempts})")
-            progress = min(25 + (attempt / max_attempts * 70), 95)
-            progress_bar.progress(int(progress))
+            status_message = f"Processing call analysis: {current_stage}..."
+            status_container.info(status_message)
             
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(f"{self.result_endpoint}/{call_id}") as response:
-                        # Also accept 201 for fetching results
                         if response.status in [200, 201]:
                             result = await response.json()
                             
@@ -117,26 +127,43 @@ class APIService:
                                 data = result.get("data")
                                 meta = data.get("meta", {})
                                 
+                                # Update progress based on available data
+                                if meta:
+                                    if "base_analysis" in meta and current_stage in ["Started", "Transcription"]:
+                                        current_stage = "Base Analysis"
+                                        progress_bar.progress(analysis_stages[current_stage])
+                                    
+                                    if "false_promise" in meta and current_stage in ["Started", "Transcription", "Base Analysis"]:
+                                        current_stage = "False Promise Analysis"
+                                        progress_bar.progress(analysis_stages[current_stage])
+                                    
+                                    if "abusive_bad_call" in meta and current_stage != "Abusive/Bad Call Analysis":
+                                        current_stage = "Abusive/Bad Call Analysis"
+                                        progress_bar.progress(analysis_stages[current_stage])
+                                    
                                 # Check if meta contains all necessary data
                                 if meta and meta.get("false_promise") and meta.get("abusive_bad_call"):
-                                    return True, data
+                                    # Get transcription if available
+                                    transcription = result.get("transcription", "")
+                                    return True, data, transcription
                                 
-                                # If we have partial data, check if processing is still ongoing
+                                # If we have partial data, continue polling
                                 if meta:
-                                    status_container.info("Analysis in progress, waiting for complete results...")
-                                
+                                    pass  # Continue polling - status message already updated above
+                                    
                             elif not result.get("success"):
-                                return False, f"API error: {json.dumps(result)}"
+                                return False, f"API error: {json.dumps(result)}", ""
                         else:
-                            status_container.warning(f"HTTP error: {response.status}, retrying...")
+                            pass
+                            # status_container.warning(f"HTTP error: {response.status}, retrying...")
                 
                 attempt += 1
                 await asyncio.sleep(self.poll_interval)
             
             except Exception as e:
-                return False, f"Error polling results: {str(e)}"
+                return False, f"Error polling results: {str(e)}", ""
         
-        return False, "Maximum polling time reached without complete results"
+        return False, "Maximum polling time reached without complete results", ""
 
 async def process_audio_file_with_s3(audio_file):
     """Process an audio file by uploading to S3 and submitting to API"""
@@ -149,7 +176,7 @@ async def process_audio_file_with_s3(audio_file):
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save the uploaded file to the temporary directory
             status_container.info("Preparing audio file...")
-            progress_bar.progress(10)
+            progress_bar.progress(5)
             
             temp_path = os.path.join(temp_dir, audio_file.name)
             with open(temp_path, 'wb') as f:
@@ -157,43 +184,41 @@ async def process_audio_file_with_s3(audio_file):
             
             # Upload to S3
             status_container.info("Uploading to S3...")
-            progress_bar.progress(25)
+            progress_bar.progress(10)
             
             s3_service = S3Service()
             s3_key = s3_service.upload_file(temp_path)
             
             if not s3_key:
                 status_container.error("Failed to upload file to S3")
-                return False, None
+                return False, None, ""
             
             # Submit to API
             status_container.info("Submitting to analysis API...")
-            progress_bar.progress(40)
+            progress_bar.progress(15)
             
             api_service = APIService()
             success, call_id = await api_service.submit_call_log(s3_key)
             
             if not success:
                 status_container.error(f"Failed to submit to API: {call_id}")
-                return False, None
+                return False, None, ""
             
             # Poll for results
             status_container.info("Starting analysis...")
-            progress_bar.progress(50)
-            
-            success, result = await api_service.poll_results(call_id, status_container, progress_bar)
+            success, result, transcription = await api_service.poll_results(call_id, status_container, progress_bar)
             
             if success:
                 progress_bar.progress(100)
                 status_container.success(f"Analysis completed successfully!")
-                return True, result
+                return True, result, transcription
             else:
                 status_container.error(f"Analysis failed: {result}")
-                return False, None
+                return False, None, ""
                 
     except Exception as e:
         st.error(f"Error processing audio: {str(e)}")
-        return False, None
+        return False, None, ""
 
 def format_false_promises(false_promise_data):
     """Format false promises data for display"""
