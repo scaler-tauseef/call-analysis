@@ -65,7 +65,7 @@ class TranscriptionService:
                             except json.JSONDecodeError as e:
                                 return self._create_result(test_id, filename, False, None, f"Failed to parse result: {str(e)}", task_id)
                         elif data.get("status") == "RUNNING" or data.get("status") == "QUEUED":
-                            status_container.info(f"Processing audio... (Task ID: {task_id}, Attempt {attempt + 1}/{max_attempts})")
+                            status_container.info(f"Processing audio...")
                             progress = min(75 + (attempt / max_attempts * 20), 95)
                             progress_bar.progress(int(progress))
                         else:
