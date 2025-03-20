@@ -210,7 +210,7 @@ async def process_audio_file_with_s3(audio_file):
             
             if success:
                 progress_bar.progress(100)
-                status_container.success(f"Analysis completed successfully!")
+                # status_container.success(f"Analysis completed successfully!")
                 return True, result, transcription
             else:
                 status_container.error(f"Analysis failed: {result}")
