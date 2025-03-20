@@ -52,7 +52,7 @@ class S3Service:
 class APIService:
     def __init__(self):
         """Initialize the API service"""
-        self.base_url = "https://11.staging.sclr.ac/external_call_logs/v1/tenant_motion"
+        self.base_url = "https://150.staging.sclr.ac/external_call_logs/v1/tenant_motion"
         self.create_endpoint = f"{self.base_url}/create"
         self.result_endpoint = f"{self.base_url}/result"
         self.poll_interval = 5  # seconds
