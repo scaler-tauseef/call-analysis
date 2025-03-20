@@ -1,5 +1,5 @@
 import streamlit as st
-from utils import transcribe_audio, analyze_transcription, format_analysis
+from utils import transcribe_audio, analyze_transcription, format_analysis, analyze_bad_phrases, format_bad_phrases_analysis
 import os
 import tempfile
 import asyncio
@@ -7,6 +7,15 @@ from functools import partial
 import aiohttp
 from utils import TranscriptionService
 import json
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Check for required environment variables
+if not os.getenv("OPENAI_API_KEY"):
+    st.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+    st.stop()
 
 # This MUST be the first Streamlit command
 st.set_page_config(
@@ -21,6 +30,7 @@ if 'initialized' not in st.session_state:
     st.session_state.initialized = True
     st.session_state.transcription = None
     st.session_state.analysis = None
+    st.session_state.bad_phrases_analysis = None
 
 # Add custom CSS
 st.markdown("""
@@ -33,6 +43,20 @@ st.markdown("""
     }
     .uploadedFile {
         margin-bottom: 2rem;
+    }
+    .logo-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+    .logo-container img {
+        max-height: 100px;
+        margin-bottom: 1.5rem;
+    }
+    .logo-container h1 {
+        margin-bottom: 0.5rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -49,18 +73,22 @@ async def process_audio(audio_file):
             # Process the audio file
             transcription = await transcribe_audio(temp_path)
             if transcription:
+                # First analyze for false promises
                 analysis = analyze_transcription(transcription)
-                return transcription, analysis
-            return None, None
+                # Then analyze for bad phrases
+                bad_phrases_analysis = analyze_bad_phrases(transcription)
+                return transcription, analysis, bad_phrases_analysis
+            return None, None, None
     except Exception as e:
         st.error(f"Error processing audio: {str(e)}")
-        return None, None
+        return None, None, None
 
 def main():
-    # Header with left-aligned styling
+    # Header with logo stacked above text
     st.markdown("""
-        <div style="padding: 2rem 0;">
-            <h1 style="margin-bottom: 1rem;">🎯 Motion Sales Call Analysis</h1>
+        <div class="logo-container">
+            <img src="https://digitalclassworld.com/business-listing/storage/app/app_resources/seller/institute/institute_icon/3558/institute-logo1719469843.png" alt="Motion Education Logo">
+            <h1>Sales Call Analysis</h1>
             <p style="font-size: 1.2rem; color: #666;">
                 Upload a sales call recording to analyze it for potential false promises and concerning patterns.
             </p>
@@ -84,15 +112,16 @@ def main():
         )
         
         if analyze_button:
-            with st.spinner("🎯 Analyzing your sales call... This may take a few minutes."):
+            with st.spinner("🎯 Analyzing your sales call..."):
                 # Run async process_audio in the event loop
                 loop = asyncio.new_event_loop()
-                transcription, analysis = loop.run_until_complete(process_audio(audio_file))
+                transcription, analysis, bad_phrases_analysis = loop.run_until_complete(process_audio(audio_file))
                 loop.close()
                 
                 if transcription and analysis:
                     st.session_state.transcription = transcription
                     st.session_state.analysis = analysis
+                    st.session_state.bad_phrases_analysis = bad_phrases_analysis
                 
             if st.session_state.transcription:
                 st.success("✨ Analysis completed successfully!")
@@ -116,25 +145,51 @@ def main():
                     )
                 
                 with col2:
-                    # Download analysis button
+                    # Download analysis buttons
                     st.download_button(
-                        "📥 Download Analysis",
+                        "📥 Download False Promises Analysis",
                         st.session_state.analysis,
-                        file_name="analysis.json",
+                        file_name="false_promises_analysis.json",
                         mime="application/json",
                         key='download_analysis_button',
                         use_container_width=True
                     )
+                    
+                    if st.session_state.bad_phrases_analysis:
+                        st.download_button(
+                            "📥 Download Bad Phrases Analysis",
+                            st.session_state.bad_phrases_analysis,
+                            file_name="bad_phrases_analysis.json",
+                            mime="application/json",
+                            key='download_bad_phrases_button',
+                            use_container_width=True
+                        )
                 
-                # Display detailed analysis results
-                st.markdown("## 🔍 Detailed Analysis")
+                # Create tabs for different analyses
+                tab1, tab2 = st.tabs(["False Promises", "Bad Phrases"])
                 
-                try:
-                    formatted_sections = format_analysis(st.session_state.analysis)
-                    for section in formatted_sections:
-                        st.markdown(section, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error("Error displaying analysis results")
+                # Tab 1: False Promises Analysis
+                with tab1:
+                    st.markdown("## 🔍 False Promises Analysis")
+                    try:
+                        formatted_sections = format_analysis(st.session_state.analysis)
+                        for section in formatted_sections:
+                            st.markdown(section, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"Error displaying false promises analysis results: {str(e)}")
+                
+                # Tab 2: Bad Phrases Analysis
+                with tab2:
+                    st.markdown("## 🔍 Bad Phrases Analysis")
+                    if st.session_state.bad_phrases_analysis:
+                        try:
+                            formatted_sections = format_bad_phrases_analysis(st.session_state.bad_phrases_analysis)
+                            for section in formatted_sections:
+                                st.markdown(section, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"Error displaying bad phrases analysis results: {str(e)}")
+                    else:
+                        st.info("Bad phrases analysis not available.")
 
 if __name__ == "__main__":
     import os

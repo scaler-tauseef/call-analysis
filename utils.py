@@ -1,6 +1,6 @@
 import os
 import tempfile
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 import streamlit as st
 import asyncio
@@ -10,12 +10,13 @@ import random
 from typing import Dict, Any, Optional, List
 import os.path
 import json
+from prompts import FALSE_PROMISE_PROMPT, BAD_CALL_PROMPT
 
 # Load environment variables
 load_dotenv()
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class TranscriptionService:
     def __init__(self):
@@ -191,157 +192,12 @@ def analyze_transcription(transcription):
         if not transcription:
             raise ValueError("No transcription provided for analysis")
 
-        system_prompt = """
-        <false_promise_detection_info>
-You are an expert at analyzing sales call transcriptions to detect false promises.
-For each false promise detected, you must provide:
-1. The exact statement made
-2. The reason why it's a false promise
-3. A confidence score (0-100) indicating how certain you are that this is a false promise
-The Assistant can detect FALSE PROMISES in a transcription of a conversation between two parties - a Motion Sales Representative and a Potential Student/Parent.
-<motion_info>
-Motion is an educational coaching institute based in Kota India, that provides coaching for JEE (Main + Advanced), NEET, Foundation courses, and other competitive exams.
-</motion_info>
-<notes>
-- BEFORE PROVIDING THE RESULT RERUN THE ANALYSIS MULTIPLE TIMES AND CHOOSE THE RESULT WITH MOST FREQUENCY
-- DON'T INTERPRET ANYTHING, Only use the rules provided in <instructions>
-- DON'T FORCE TO FIND A FALSE PROMISE
-- ONLY USE TEXT PRESENT IN TRANSCRIPTION FOR DETECTION
-- ONLY USE MENTIONED INSTRUCTIONS TO DETECT FALSE PROMISE, ANY OTHER INFORMATION EVEN IF IT SEEMS UNREALISTIC, UNVERIFIABLE OR EXAGGERATED SHOULD NOT BE CONSIDERED AS FALSE PROMISE
-- ONLY CONSIDER FALSE PROMISES WHICH DIRECTLY BREAK A RULE. SALES TACTICS/GREY AREAS THAT ARE OPEN TO INTERPRETATION WON'T COUNT AS FALSE PROMISES
-</notes>
-<instructions>
-To detect false promises in the transcription of the conversation, use the following steps:
-1. Before Detecting False Promise, tag each statement if It was made by Sales Representative or Potential Student/Parent.
-2. Go through each statement made by Sales Representative.
-3. Check if the statements made about Motion courses, Motion Policy, Motion Institute, Motion Fees, EMI, and the Sales Representative (themselves).
-4. If no, The Statement is not about Motion or Sales Representative. Then move to next statement and repeat from step 3.
-5. If yes, The statement is about Motion or Sales Representative. Then check if it is a False Promise using below rules -
-    - Statement Related To Results and Rankings
-        - It can't guarantee 100% selection in JEE/NEET
-        - It can't guarantee specific ranks in JEE/NEET
-        - It can mention past year results and top rankers
-        - [Grey Area/Sales Tactic] It can provide examples of successful students but -
-            - It can't guarantee similar results for new students
-        - It can mention being among top coaching institutes in Kota
-        - It can't claim to be the "only" successful institute in any category
-    - Statement Related to Faculty and Teaching
-        - It can mention experienced faculty members but -
-            - It can't guarantee specific teachers for specific batches
-            - It can't guarantee same teachers throughout the course
-        - It can mention faculty from IITs/NITs but -
-            - It can't guarantee all teachers are from IITs/NITs
-        - [Grey Area/Sales Tactic] It can mention faculty experience but -
-            - It can't guarantee specific years of experience for all faculty
-        - It can't guarantee 24/7 doubt solving
-        - It can mention regular doubt solving sessions but -
-            - It can't guarantee immediate doubt resolution
-        - It can mention faculty being featured in media
-        - It can mention faculty's teaching style
-        - It can mention faculty's past student success stories
-        - [Grey Area/Sales Tactic] It can compare faculty with other institutes but -
-            - It can't guarantee they are better than all other institutes
-    - Statement Related to Study Material and Tests
-        - It can mention providing study material and DPPs
-        - It can mention regular test series
-        - It can mention providing online resources
-        - [Grey Area/Sales Tactic] It can mention quality of study material but -
-            - It can't guarantee specific marks improvement
-        - It can't guarantee questions from study material will come in actual exams
-        - It can mention DPP (Daily Practice Problems)
-        - It can mention mock tests and test series
-        - It can mention previous year papers and solutions
-    - Statement Related to Fees and Payment
-        - It can mention current fee structure
-        - It can mention available EMI options but -
-            - It can't guarantee approval of EMI
-        - It can mention scholarship tests and criteria
-        - [Grey Area/Sales Tactic] It can mention fee increase in future but -
-            - It can't specify exact amount of increase
-        - It can mention refund policy as per terms
-        - It can't guarantee scholarship amounts before tests
-        - It can mention MOST (Motion Open Scholarship Test)
-        - It can mention different payment plans and options
-        - It can mention early bird discounts
-        - [Grey Area/Sales Tactic] It can mention limited time offers but -
-            - It can't guarantee specific scholarship amounts
-    - Statement Related to Facilities and Infrastructure
-        - It can mention available facilities
-        - It can mention hostel/accommodation options but -
-            - It can't guarantee specific hostel rooms/locations
-        - It can mention library facilities but -
-            - It can't guarantee 24/7 library access
-        - [Grey Area/Sales Tactic] It can mention AC classrooms but -
-            - It can't guarantee specific seats/sections
-    - Statement Related to Online/Hybrid Programs
-        - It can mention online/hybrid learning options
-        - It can mention recorded lectures availability
-        - It can mention online test features
-        - [Grey Area/Sales Tactic] It can mention tech platforms but -
-            - It can't guarantee zero technical issues
-        - It can't guarantee same results as offline programs
-    - Statement Related to Sales Representative
-        - Can mention roles like Counselor, Academic Advisor but -
-            - Can't claim direct involvement in academics
-        - Can mention general guidance
-        - Can't guarantee personal attention throughout course
-        - [Grey Area/Sales Tactic] Can suggest best options but -
-            - Can't guarantee outcomes
-    - Statement Related to Rankings and Competition
-        - It can mention being among top coaching institutes in Kota
-        - It can mention success stories and testimonials
-        - [Grey Area/Sales Tactic] It can compare with other institutes but -
-            - It can't claim to be definitively better than all other institutes
-        - It can't guarantee better results than other coaching institutes
-        - It can mention awards and recognition received
-    - Statement Related to Learning App and Technology
-        - It can mention features of Motion Learning App
-        - It can mention AI-based homework system
-        - It can mention online resources and tools
-        - [Grey Area/Sales Tactic] It can mention tech benefits but -
-            - It can't guarantee 24/7 app availability
-            - It can't guarantee technical problem-free experience
-    - Statement Related to Specific Courses
-        - It can mention different course types (JEE/NEET/Foundation)
-        - It can mention course duration and schedule
-        - It can mention medium of instruction (Hindi/English)
-        - [Grey Area/Sales Tactic] It can mention course benefits but -
-            - It can't guarantee specific outcomes for specific courses
-            - It can't guarantee selection in specific colleges/branches
-    - Statement Related to Student Wellbeing
-        - It can mention student support systems
-        - It can mention counseling services
-        - It can mention stress management programs
-        - [Grey Area/Sales Tactic] It can mention student care features but -
-            - It can't guarantee stress-free preparation
-            - It can't guarantee mental wellness outcomes
-6. Add your confidence about the statement tagged as FALSE PROMISE:
-    - [1-3]: Statement doesn't break any rules
-    - [4-6]: Statement is a sales tactic that falls under [Gray Area]
-    - [7-10]: Statement breaks an important rule
-7. After all statements checked sort them based on the confidence (False promise with high confidence above)
-8. Provide the FALSE PROMISE only if it is present
-</instructions>
-
-
-Format your response as JSON with the following structure:
-{
-    "false_promises": [
-        {
-            "statement": "exact statement from transcription",
-            "reason": "detailed explanation of why this is a false promise",
-            "confidence": number between 0-100
-        }
-    ]
-}
-Analyze the following transcription:"""
-
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": FALSE_PROMISE_PROMPT},
             {"role": "user", "content": transcription}
         ]
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4o",
             messages=messages,
             temperature=0.1,
@@ -352,6 +208,32 @@ Analyze the following transcription:"""
 
     except Exception as e:
         st.error(f"Error during analysis: {str(e)}")
+        return None
+
+def analyze_bad_phrases(transcription):
+    """
+    Analyze transcription using OpenAI's GPT model to detect bad and abusive phrases
+    """
+    try:
+        if not transcription:
+            raise ValueError("No transcription provided for analysis")
+
+        messages = [
+            {"role": "system", "content": BAD_CALL_PROMPT},
+            {"role": "user", "content": transcription}
+        ]
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.1,
+            response_format={ "type": "json_object" }
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        st.error(f"Error during bad phrase analysis: {str(e)}")
         return None
 
 def format_analysis(analysis_text):
@@ -412,4 +294,64 @@ def format_analysis(analysis_text):
     except json.JSONDecodeError:
         return ["Error: Could not parse analysis results."]
     except Exception as e:
-        return [f"Error formatting analysis: {str(e)}"] 
+        return [f"Error formatting analysis: {str(e)}"]
+
+def format_bad_phrases_analysis(analysis_text):
+    """
+    Format the bad phrases analysis results for display
+    """
+    try:
+        analysis = json.loads(analysis_text)
+        formatted_sections = []
+        
+        if not analysis.get('bad_phrases'):
+            return ["No bad or abusive phrases detected in the conversation."]
+            
+        # Sort bad phrases by severity or confidence score if available
+        bad_phrases = sorted(
+            analysis['bad_phrases'],
+            key=lambda x: x.get('severity', 0),
+            reverse=True
+        )
+        
+        for phrase in bad_phrases:
+            severity = phrase.get('severity', 50)
+            
+            # Determine severity level and styling
+            if severity >= 80:
+                severity_label = "🔴 High Severity"
+                color = "red"
+            elif severity >= 50:
+                severity_label = "🟡 Medium Severity"
+                color = "orange"
+            else:
+                severity_label = "🟢 Low Severity"
+                color = "green"
+                
+            # Create formatted HTML section
+            section = f"""
+            <div style="padding: 1rem; margin: 1rem 0; border-radius: 8px; border: 1px solid {color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h3 style="margin: 0; color: {color};">{severity_label}</h3>
+                    <span style="background-color: {color}; color: white; padding: 0.25rem 0.5rem; border-radius: 4px;">
+                        Severity: {severity}%
+                    </span>
+                </div>
+                <div style="margin: 1rem 0;">
+                    <p style="font-weight: bold;">Phrase:</p>
+                    <p style="margin-left: 1rem; font-style: italic;">"{phrase['phrase']}"</p>
+                </div>
+                <div>
+                    <p style="font-weight: bold;">Reason:</p>
+                    <p style="margin-left: 1rem;">{phrase['reason']}</p>
+                </div>
+            </div>
+            """
+            formatted_sections.append(section)
+            
+        return formatted_sections
+
+    except json.JSONDecodeError:
+        return ["Error: Could not parse bad phrases analysis results."]
+    except Exception as e:
+        return [f"Error formatting bad phrases analysis: {str(e)}"] 
