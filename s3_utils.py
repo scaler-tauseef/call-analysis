@@ -42,12 +42,39 @@ class S3Service:
             self.s3_client.upload_file(file_path, self.s3_bucket, s3_key)
             return s3_key
         except Exception as e:
-            st.error(f"Error uploading file to S3: {str(e)}")
+            st.error(f"Error uploading file: {str(e)}")
             return None
     
     def generate_random_id(self, length=16):
         """Generate a random ID for file naming"""
         return ''.join(random.choice(string.digits) for _ in range(length))
+
+def save_local_audio_copy(audio_file, custom_filename=None):
+    """Save a local copy of the uploaded audio file to the uploads folder"""
+    try:
+        # Ensure uploads directory exists
+        uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+        if not os.path.exists(uploads_dir):
+            os.makedirs(uploads_dir)
+            
+        # Generate filename if not provided
+        if not custom_filename:
+            ext = os.path.splitext(audio_file.name)[1]
+            timestamp = int(time.time())
+            random_id = ''.join(random.choice(string.digits) for _ in range(8))
+            filename = f"audio_{timestamp}_{random_id}{ext}"
+        else:
+            filename = custom_filename
+            
+        # Save file
+        file_path = os.path.join(uploads_dir, filename)
+        with open(file_path, 'wb') as f:
+            f.write(audio_file.getvalue())
+            
+        return filename, file_path
+    except Exception as e:
+        st.error(f"Error saving local audio copy: {str(e)}")
+        return None, None
 
 class APIService:
     def __init__(self):
@@ -96,7 +123,7 @@ class APIService:
         except Exception as e:
             return False, f"Error submitting call log: {str(e)}"
     
-    async def poll_results(self, call_id, status_container, progress_bar):
+    async def poll_results(self, call_id, status_container=None, progress_bar=None):
         """Poll for results until they're available or timeout"""
         max_attempts = self.max_poll_time // self.poll_interval
         attempt = 0
@@ -111,11 +138,13 @@ class APIService:
         }
         
         current_stage = "Started"
-        progress_bar.progress(analysis_stages[current_stage])
+        if progress_bar:
+            progress_bar.progress(analysis_stages[current_stage])
         
         while attempt < max_attempts:
             status_message = f"Processing call analysis: {current_stage}..."
-            status_container.info(status_message)
+            if status_container:
+                status_container.info(status_message)
             
             try:
                 async with aiohttp.ClientSession() as session:
@@ -131,15 +160,18 @@ class APIService:
                                 if meta:
                                     if "base_analysis" in meta and current_stage in ["Started", "Transcription"]:
                                         current_stage = "Base Analysis"
-                                        progress_bar.progress(analysis_stages[current_stage])
+                                        if progress_bar:
+                                            progress_bar.progress(analysis_stages[current_stage])
                                     
                                     if "false_promise" in meta and current_stage in ["Started", "Transcription", "Base Analysis"]:
                                         current_stage = "False Promise Analysis"
-                                        progress_bar.progress(analysis_stages[current_stage])
+                                        if progress_bar:
+                                            progress_bar.progress(analysis_stages[current_stage])
                                     
                                     if "abusive_bad_call" in meta and current_stage != "Abusive/Bad Call Analysis":
                                         current_stage = "Abusive/Bad Call Analysis"
-                                        progress_bar.progress(analysis_stages[current_stage])
+                                        if progress_bar:
+                                            progress_bar.progress(analysis_stages[current_stage])
                                     
                                 # Check if meta contains all necessary data
                                 if meta and meta.get("false_promise") and meta.get("abusive_bad_call"):
@@ -155,7 +187,8 @@ class APIService:
                                 return False, f"API error: {json.dumps(result)}", ""
                         else:
                             pass
-                            # status_container.warning(f"HTTP error: {response.status}, retrying...")
+                            # if status_container:
+                            #     status_container.warning(f"HTTP error: {response.status}, retrying...")
                 
                 attempt += 1
                 await asyncio.sleep(self.poll_interval)
@@ -165,60 +198,72 @@ class APIService:
         
         return False, "Maximum polling time reached without complete results", ""
 
-async def process_audio_file_with_s3(audio_file):
-    """Process an audio file by uploading to S3 and submitting to API"""
+async def process_audio_file_with_s3(audio_file, status_container=None, progress_bar=None):
+    """Process an audio file by uploading"""
     try:
         # Show loading status
-        status_container = st.empty()
-        progress_bar = st.progress(0)
+        use_internal_ui = status_container is None
+        if use_internal_ui:
+            status_container = st.empty()
+            progress_bar = st.progress(0)
+        
+        # Save a local copy first
+        local_filename, local_path = save_local_audio_copy(audio_file)
+        if not local_filename:
+            status_container.error("Failed to save local copy of audio file")
         
         # Create a temporary directory
         with tempfile.TemporaryDirectory() as temp_dir:
             # Save the uploaded file to the temporary directory
             status_container.info("Preparing audio file...")
-            progress_bar.progress(5)
+            if progress_bar:
+                progress_bar.progress(5)
             
             temp_path = os.path.join(temp_dir, audio_file.name)
             with open(temp_path, 'wb') as f:
                 f.write(audio_file.getbuffer())
             
             # Upload to S3
-            status_container.info("Uploading to S3...")
-            progress_bar.progress(10)
+            status_container.info("Uploading...")
+            if progress_bar:
+                progress_bar.progress(10)
             
             s3_service = S3Service()
             s3_key = s3_service.upload_file(temp_path)
             
             if not s3_key:
-                status_container.error("Failed to upload file to S3")
-                return False, None, ""
+                status_container.error("Failed to upload file")
+                return False, None, "", local_filename
             
             # Submit to API
-            status_container.info("Submitting to analysis API...")
-            progress_bar.progress(15)
+            status_container.info("Submitting...")
+            if progress_bar:
+                progress_bar.progress(15)
             
             api_service = APIService()
             success, call_id = await api_service.submit_call_log(s3_key)
             
             if not success:
-                status_container.error(f"Failed to submit to API: {call_id}")
-                return False, None, ""
+                status_container.error(f"Failed to submit: {call_id}")
+                return False, None, "", local_filename
             
             # Poll for results
             status_container.info("Starting analysis...")
             success, result, transcription = await api_service.poll_results(call_id, status_container, progress_bar)
             
             if success:
-                progress_bar.progress(100)
+                if progress_bar:
+                    progress_bar.progress(100)
                 # status_container.success(f"Analysis completed successfully!")
-                return True, result, transcription
+                return True, result, transcription, local_filename
             else:
                 status_container.error(f"Analysis failed: {result}")
-                return False, None, ""
+                return False, None, "", local_filename
                 
     except Exception as e:
-        st.error(f"Error processing audio: {str(e)}")
-        return False, None, ""
+        if status_container:
+            status_container.error(f"Error processing audio: {str(e)}")
+        return False, None, "", None
 
 def format_false_promises(false_promise_data):
     """Format false promises data for display"""
