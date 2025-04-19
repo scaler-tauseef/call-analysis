@@ -20,8 +20,8 @@ if not os.getenv("OPENAI_API_KEY"):
 
 # This MUST be the first Streamlit command
 st.set_page_config(
-    page_title="Motion Sales Call Analysis",
-    page_icon="🎯",
+    page_title="Scaler Ai Call Analysis Demo",
+    page_icon=os.path.join(os.path.dirname(__file__), "favicon.ico"),
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -70,8 +70,8 @@ def main():
     # Header with logo stacked above text
     st.markdown("""
         <div class="logo-container">
-            <img src="https://digitalclassworld.com/business-listing/storage/app/app_resources/seller/institute/institute_icon/3558/institute-logo1719469843.png" alt="Motion Education Logo">
-            <h1>Sales Call Analysis</h1>
+            <img src="https://scaler-blog-prod-wp-content.s3.ap-south-1.amazonaws.com/wp-content/uploads/2022/10/22114541/Scaler_Logo_WhiteBG-860x484.jpg" alt="Scaler Logo">
+            <h1>Scaler AI Call Analysis Demo</h1>
             <p style="font-size: 1.2rem; color: #666;">
                 Upload a sales call recording to analyze it for potential false promises and concerning patterns.
             </p>
