@@ -20,8 +20,8 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class TranscriptionService:
     def __init__(self):
-        # self.base_url = "https://fast-transcriber.sales-copilot.scaler.com"
-        self.base_url = "http://motion-transcriber-service.us-west-2.elasticbeanstalk.com"
+        self.base_url = "https://fast-transcriber.sales-copilot.scaler.com"
+        #self.base_url = "http://motion-transcriber-service.us-west-2.elasticbeanstalk.com"
         self.metrics = {"success": 0, "failed": 0}
         self.max_poll_time = 300  # 5 minutes maximum polling time
         self.poll_interval = 5  # 5 seconds between polls
